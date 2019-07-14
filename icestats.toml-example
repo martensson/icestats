@@ -1,0 +1,4 @@
+User = "admin"
+Password = "123456"
+URL = "http://example.com:8000"
+Mounts = ["/channel1", "/channel2"]
