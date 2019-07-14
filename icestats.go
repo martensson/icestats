@@ -18,7 +18,7 @@ import (
 
 // XML Structs
 type listener struct {
-	IP        string `xml:"IP"`
+	IP        string `xml:"IP" json:"-"`
 	UserAgent string `xml:"UserAgent"`
 	Connected string `xml:"Connected"`
 	ID        string `xml:"ID"`
@@ -132,8 +132,9 @@ func main() {
 	r := http.NewServeMux()
 	r.HandleFunc("/", statHandler)
 	loggedRouter := handlers.LoggingHandler(os.Stdout, r)
+	proxyRouter := handlers.ProxyHeaders(loggedRouter)
 	srv := &http.Server{
-		Handler: loggedRouter,
+		Handler: proxyRouter,
 		Addr:    *iface + ":" + *port,
 		// Good practice: enforce timeouts
 		WriteTimeout: 5 * time.Second,
