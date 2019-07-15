@@ -13,18 +13,16 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/gorilla/handlers"
+	"github.com/mmcloughlin/geohash"
 	"github.com/oschwald/geoip2-golang"
 )
 
 // XML Structs
 type listener struct {
-	IP        string `xml:"IP" json:"-"`
+	IP        string `xml:"IP"`
 	UserAgent string `xml:"UserAgent"`
 	Connected string `xml:"Connected"`
 	ID        string `xml:"ID"`
-	Country   string
-	City      string
-	Mount     string
 }
 
 type source struct {
@@ -40,11 +38,21 @@ type xmlstats struct {
 }
 
 // JSON Structs
-type stats struct {
-	Clients   []listener
+type city struct {
+	Total   int
+	Geohash string
+}
+
+type country struct {
 	Total     int
-	Countries map[string]int
-	Cities    map[string]int
+	ISO       string
+	Continent string
+	Cities    map[string]*city
+}
+
+type stats struct {
+	Total     int
+	Countries map[string]*country
 }
 
 // Config
@@ -60,8 +68,7 @@ var cfg config
 
 func statHandler(w http.ResponseWriter, r *http.Request) {
 	stats := new(stats)
-	stats.Cities = make(map[string]int)
-	stats.Countries = make(map[string]int)
+	stats.Countries = make(map[string]*country)
 	for _, mount := range cfg.Mounts {
 		client := &http.Client{}
 		req, err := http.NewRequest("GET", cfg.URL+"/admin/listclients?mount="+mount, nil)
@@ -87,22 +94,29 @@ func statHandler(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				continue
 			}
-			l.City = record.City.Names["en"]
-			l.Country = record.Country.Names["en"]
-			l.Mount = xmlstats.Source.Mount
-			stats.Clients = append(stats.Clients, l)
-			if l.Country != "" {
-				if i, ok := stats.Countries[l.Country]; ok {
-					stats.Countries[l.Country] = i + 1
+			co := record.Country.Names["en"]
+			if co != "" {
+				if _, ok := stats.Countries[co]; ok {
+					stats.Countries[co].Total = stats.Countries[co].Total + 1
 				} else {
-					stats.Countries[l.Country] = 1
+					stats.Countries[co] = &country{
+						ISO:       record.Country.IsoCode,
+						Total:     1,
+						Continent: record.Continent.Names["en"],
+						Cities:    make(map[string]*city),
+					}
 				}
-			}
-			if l.City != "" {
-				if i, ok := stats.Cities[l.City]; ok {
-					stats.Cities[l.City] = i + 1
-				} else {
-					stats.Cities[l.City] = 1
+				ci := record.City.Names["en"]
+				if ci != "" {
+					if _, ok := stats.Countries[co].Cities[ci]; ok {
+						stats.Countries[co].Cities[ci].Total = stats.Countries[co].Cities[ci].Total + 1
+					} else {
+						hash := geohash.Encode(record.Location.Latitude, record.Location.Longitude)
+						stats.Countries[co].Cities[ci] = &city{
+							Total:   1,
+							Geohash: hash,
+						}
+					}
 				}
 			}
 		}
@@ -134,9 +148,8 @@ func main() {
 	loggedRouter := handlers.LoggingHandler(os.Stdout, r)
 	proxyRouter := handlers.ProxyHeaders(loggedRouter)
 	srv := &http.Server{
-		Handler: proxyRouter,
-		Addr:    *iface + ":" + *port,
-		// Good practice: enforce timeouts
+		Handler:      proxyRouter,
+		Addr:         *iface + ":" + *port,
 		WriteTimeout: 5 * time.Second,
 		ReadTimeout:  5 * time.Second,
 	}
